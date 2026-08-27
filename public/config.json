@@ -1,0 +1,8 @@
+{
+  "energyGain": 30,
+  "energyThreshold": 0.08,
+  "smoothing": 0.94,
+  "pitchScale": 5500,
+  "valenceOffset": 0.18,
+  "stabilityFrames": 25
+}

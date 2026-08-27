@@ -1,0 +1,27 @@
+@import "tailwindcss";
+
+:root {
+  --color-anabelle-cyan: #00f2ff;
+  --color-anabelle-magenta: #ff00ea;
+  --color-anabelle-dark: #050505;
+}
+
+body {
+  margin: 0;
+  background-color: #050505;
+  color: white;
+  overflow: hidden;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+/* Custom Scrollbar for the Dashboard */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(0, 242, 255, 0.2);
+  border-radius: 10px;
+}
