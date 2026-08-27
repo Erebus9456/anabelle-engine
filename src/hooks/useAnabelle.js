@@ -1,85 +1,108 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 
 export const useAnabelle = () => {
   const [analysis, setAnalysis] = useState({
     energy: 0,
-    pitch: 0,
-    harshness: 0,
-    valence: 0.5,
-    arousal: 0.5,
     emotion: 'NEUTRAL',
+    rawText: '',
+    source: 'STANDBY',
     isSpeaking: false,
     status: 'idle'
   });
 
   const socketRef = useRef(null);
-  const audioContextRef = useRef(null);
+  const audioCtxRef = useRef(null);
   const processorRef = useRef(null);
   const streamRef = useRef(null);
-  
-  // Storage for the AI's current decision to prevent state overwrites
-  const currentAiEmotion = useRef('NEUTRAL');
 
-  const startEngine = async () => {
+  // Constants for AI compatibility
+  const SAMPLE_RATE = 16000;
+  const BUFFER_SIZE = 4096; // ~250ms of audio per packet
+
+  const startEngine = useCallback(async () => {
+    // 1. Establish WebSocket Connection
     socketRef.current = new WebSocket("ws://localhost:8000/ws/anabelle");
 
+    socketRef.current.onopen = () => {
+      console.log("ANABELLE: Connected to Python AI Backend");
+      setAnalysis(prev => ({ ...prev, status: 'connected', source: 'INITIALIZING' }));
+    };
+
     socketRef.current.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.status === "success") {
-        console.log("AI Inference:", data.emotion);
-        currentAiEmotion.current = data.emotion;
+      try {
+        const data = JSON.parse(event.data);
+        if (data.status !== "error") {
+          setAnalysis(prev => ({
+            ...prev,
+            emotion: data.emotion,
+            rawText: data.raw_text || prev.rawText,
+            source: data.source || 'AI_MODEL'
+          }));
+        }
+      } catch (err) {
+        console.error("Payload Error:", err);
       }
     };
 
+    socketRef.current.onclose = () => {
+      setAnalysis(prev => ({ ...prev, status: 'disconnected', source: 'OFFLINE' }));
+    };
+
+    // 2. Initialize Audio Pipeline
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
-      
-      // AI standard 16kHz
-      audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-      const source = audioContextRef.current.createMediaStreamSource(stream);
-      
-      // Use a smaller buffer for more responsive visual bars (4096 vs 16384)
-      processorRef.current = audioContextRef.current.createScriptProcessor(4096, 1, 1);
+
+      // Create AudioContext at 16kHz for SenseVoice
+      audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)({
+        sampleRate: SAMPLE_RATE,
+      });
+
+      const source = audioCtxRef.current.createMediaStreamSource(stream);
+      processorRef.current = audioCtxRef.current.createScriptProcessor(BUFFER_SIZE, 1, 1);
 
       processorRef.current.onaudioprocess = (e) => {
         const inputData = e.inputBuffer.getChannelData(0);
         
-        // 1. Calculate Visual Energy (Reflexes)
+        // --- LOCAL REFLEX: Instant Volume Calculation ---
         let sum = 0;
         for (let i = 0; i < inputData.length; i++) {
           sum += inputData[i] * inputData[i];
         }
         const rms = Math.sqrt(sum / inputData.length);
-        const visualEnergy = Math.min(rms * 8, 1);
+        const currentEnergy = Math.max(0, Math.min(1, rms * 10)); // Normalize 0-1
 
-        // 2. Update the UI state
-        // We combine the local energy with the last known AI emotion
+        // Update local reflexes every frame
         setAnalysis(prev => ({
           ...prev,
-          energy: visualEnergy,
-          emotion: currentAiEmotion.current,
-          isSpeaking: visualEnergy > 0.05,
-          // Map emotion to visual valence/arousal for the 3D model
-          arousal: currentAiEmotion.current === "EXCITED" || currentAiEmotion.current === "ANGRY" ? 0.8 : 0.4,
-          valence: currentAiEmotion.current === "EXCITED" || currentAiEmotion.current === "HAPPY" ? 0.8 : 0.3,
-          status: 'active'
+          energy: currentEnergy,
+          isSpeaking: currentEnergy > 0.02
         }));
 
-        // 3. Stream to AI (Cognition)
+        // --- REMOTE COGNITION: Stream to Python AI ---
         if (socketRef.current?.readyState === WebSocket.OPEN) {
+          // Send raw float32 buffer directly
           socketRef.current.send(inputData.buffer);
         }
       };
 
+      // Connect nodes
       source.connect(processorRef.current);
-      processorRef.current.connect(audioContextRef.current.destination);
-      setAnalysis(prev => ({ ...prev, status: 'connected' }));
+      processorRef.current.connect(audioCtxRef.current.destination);
 
     } catch (err) {
-      setAnalysis(prev => ({ ...prev, status: 'error' }));
+      console.error("Microphone Access Denied:", err);
+      setAnalysis(prev => ({ ...prev, status: 'error', source: 'MIC_DENIED' }));
     }
-  };
+  }, []);
 
-  return { analysis, startEngine };
+  const stopEngine = useCallback(() => {
+    processorRef.current?.disconnect();
+    audioCtxRef.current?.close();
+    streamRef.current?.getTracks().forEach(track => track.stop());
+    socketRef.current?.close();
+    setAnalysis({ energy: 0, emotion: 'NEUTRAL', rawText: '', source: 'STANDBY', isSpeaking: false, status: 'idle' });
+  }, []);
+
+  return { analysis, startEngine, stopEngine };
 };
