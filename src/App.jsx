@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, ContactShadows, Environment } from '@react-three/drei';
-import { Activity, Heart, Zap, ShieldCheck, Cpu, MessageSquare, Terminal } from 'lucide-react';
+import { Activity, Heart, Zap, ShieldCheck, MessageSquare, Terminal, AlertTriangle, RefreshCcw } from 'lucide-react';
 import { useAnabelle } from './hooks/useAnabelle';
 import { Avatar } from './components/Avatar';
 
 export default function App() {
-  const { analysis, startEngine } = useAnabelle();
+  const { analysis, startEngine, stopEngine } = useAnabelle();
   const [isInitialized, setIsInitialized] = useState(false);
 
   const handleStart = () => {
@@ -14,29 +14,42 @@ export default function App() {
     setIsInitialized(true);
   };
 
+  const handleRetry = () => {
+    stopEngine();
+    setTimeout(startEngine, 500);
+  };
+
   return (
     <div className="h-screen w-screen bg-[#050505] text-white flex overflow-hidden font-sans">
       
-      {/* LEFT SIDE: THE 3D VIEWPORT */}
+      {/* LEFT VIEWPORT */}
       <div className="flex-grow relative bg-gradient-to-b from-[#080808] to-[#121212]">
         <Canvas camera={{ position: [0, 0, 3.5], fov: 45 }}>
           <ambientLight intensity={0.4} />
-          <pointLight position={[10, 10, 10]} intensity={1} />
-          
           <Avatar analysis={analysis} />
-          
           <ContactShadows position={[0, -1.2, 0]} opacity={0.6} scale={10} blur={2.2} far={4} />
           <Environment preset="night" />
           <OrbitControls enableZoom={false} enablePan={false} />
         </Canvas>
 
-        {/* STATUS HUD */}
-        {isInitialized && (
-          <div className="absolute bottom-8 left-8 flex items-center gap-4 animate-pulse">
-            <div className={`w-2 h-2 rounded-full ${analysis.isSpeaking ? 'bg-anabelle-cyan shadow-[0_0_10px_#00f2ff]' : 'bg-white/20'}`} />
-            <span className="text-[10px] font-mono tracking-[0.3em] text-white/40 uppercase">
-              {analysis.isSpeaking ? 'Cognitive Processing Active' : 'System Standby'}
-            </span>
+        {/* CONNECTION ERROR OVERLAY */}
+        {analysis.status === 'error' && (
+          <div className="absolute top-6 left-1/2 -translate-x-1/2 w-fit min-w-[400px] z-[60] animate-in slide-in-from-top duration-500">
+            <div className="bg-red-950/40 backdrop-blur-md border border-red-500/50 p-4 rounded-2xl flex items-center justify-between gap-6 shadow-[0_0_30px_rgba(239,68,68,0.2)]">
+              <div className="flex items-center gap-3">
+                <AlertTriangle className="text-red-500" size={20} />
+                <div className="space-y-0.5">
+                  <p className="text-[10px] font-bold text-red-500 uppercase tracking-widest">Connection Failure</p>
+                  <p className="text-xs text-white/70 font-medium">{analysis.errorMessage}</p>
+                </div>
+              </div>
+              <button 
+                onClick={handleRetry}
+                className="p-2 hover:bg-red-500/20 rounded-full transition-colors group"
+              >
+                <RefreshCcw size={16} className="text-red-400 group-active:rotate-180 transition-transform" />
+              </button>
+            </div>
           </div>
         )}
 
@@ -62,10 +75,8 @@ export default function App() {
         )}
       </div>
 
-      {/* RIGHT SIDE: COMMAND PANEL */}
-      <div className="w-96 bg-[#0a0a0a] border-l border-white/5 p-8 flex flex-col gap-8 shadow-2xl overflow-y-auto custom-scrollbar">
-        
-        {/* BRANDING */}
+      {/* RIGHT SIDE DASHBOARD */}
+      <div className="w-96 bg-[#0a0a0a] border-l border-white/5 p-8 flex flex-col gap-8 shadow-2xl overflow-y-auto">
         <div className="flex items-center justify-between">
           <div>
             <div className="flex items-center gap-2 text-anabelle-cyan">
@@ -74,72 +85,53 @@ export default function App() {
             </div>
             <p className="text-[10px] text-white/20 tracking-[0.3em] uppercase mt-1">Cognitive Control Deck</p>
           </div>
+          <div className={`w-2 h-2 rounded-full ${analysis.status === 'active' ? 'bg-anabelle-cyan shadow-[0_0_8px_cyan]' : analysis.status === 'error' ? 'bg-red-500 shadow-[0_0_8px_red]' : 'bg-white/10'}`} />
         </div>
 
-        {/* METRICS: VOICE REFLEXES */}
         <section className="space-y-4">
           <header className="flex items-center gap-2 text-white/40 text-[10px] font-bold uppercase tracking-widest">
-            <Activity size={14} /> Voice DNA (Local)
+            <Activity size={14} /> Voice DNA
           </header>
           <div className="bg-white/[0.02] p-4 rounded-xl border border-white/5 space-y-4">
             <MetricRow label="Energy / Reflex" value={analysis.energy} color="bg-anabelle-cyan" />
-            <div className="flex justify-between items-center text-[10px] font-mono">
-              <span className="text-white/30 uppercase">Status</span>
-              <span className={analysis.isSpeaking ? "text-anabelle-cyan" : "text-white/10"}>
-                {analysis.isSpeaking ? "SPEAKING" : "SILENT"}
-              </span>
-            </div>
           </div>
         </section>
 
-        {/* COGNITIVE STREAM: AI TRANSCRIPTION */}
         <section className="space-y-4">
           <header className="flex items-center gap-2 text-white/40 text-[10px] font-bold uppercase tracking-widest">
-            <MessageSquare size={14} /> Cognitive Stream (AI)
+            <MessageSquare size={14} /> Cognitive Stream
           </header>
-          <div className="bg-black p-4 rounded-xl border border-white/10 min-h-[80px] flex flex-col justify-center relative overflow-hidden">
-             <div className="absolute top-2 right-3 flex gap-1">
-                <div className="w-1 h-1 rounded-full bg-red-500/50" />
-                <div className="w-1 h-1 rounded-full bg-yellow-500/50" />
-                <div className="w-1 h-1 rounded-full bg-green-500/50" />
-             </div>
-             <p className="text-xs font-mono italic text-anabelle-cyan/80 leading-relaxed">
+          <div className="bg-black p-4 rounded-xl border border-white/10 min-h-[80px] flex flex-col justify-center relative">
+             <p className="text-xs font-mono italic text-anabelle-cyan/80">
                {analysis.isSpeaking ? `"${analysis.rawText}..."` : "> Awaiting vocal input..."}
              </p>
           </div>
         </section>
 
-        {/* AFFECTIVE STATE: AI EMOTION */}
         <section className="space-y-4">
           <header className="flex items-center gap-2 text-white/40 text-[10px] font-bold uppercase tracking-widest">
             <Heart size={14} /> Inferred Emotion
           </header>
-          <div className="relative group">
-            <div className="absolute -inset-0.5 bg-gradient-to-r from-anabelle-cyan to-anabelle-magenta rounded-2xl blur opacity-10 group-hover:opacity-20 transition duration-1000"></div>
-            <div className="relative bg-[#050505] border border-white/10 p-8 rounded-2xl text-center">
-              <div className="text-4xl font-black tracking-tight text-white mb-1 uppercase">
-                {analysis.emotion}
-              </div>
-              <div className="text-[8px] text-white/30 uppercase tracking-[0.4em]">Inference Source: {analysis.source}</div>
+          <div className="relative bg-[#050505] border border-white/10 p-8 rounded-2xl text-center shadow-inner">
+            <div className="text-4xl font-black tracking-tight text-white mb-1 uppercase">
+              {analysis.emotion}
             </div>
+            <div className="text-[8px] text-white/30 uppercase tracking-[0.4em]">Source: {analysis.source}</div>
           </div>
         </section>
 
-        {/* SYSTEM CONSOLE */}
         <div className="mt-auto p-4 bg-black rounded-lg border border-white/5 font-mono text-[9px] text-white/20 space-y-1">
           <div className="flex items-center gap-2 text-anabelle-cyan/40">
-            <Terminal size={10} /> <span>SYSTEM_LOG_v2.0.4</span>
+            <Terminal size={10} /> <span>SYSTEM_LOG</span>
           </div>
-          <p>{`> BACKEND: WS://LOCALHOST:8000`}</p>
-          <p>{`> ENGINE: SENSE_VOICE_SMALL`}</p>
-          <p>{`> LATENCY: < 150MS_VAR`}</p>
+          <p>{`> BACKEND_STATUS: ${analysis.status.toUpperCase()}`}</p>
+          <p>{`> PACKET_LOSS: 0.0%`}</p>
         </div>
       </div>
     </div>
   );
 }
 
-// UI HELPER: METRIC BARS
 function MetricRow({ label, value, color }) {
   return (
     <div className="space-y-2">
@@ -148,10 +140,7 @@ function MetricRow({ label, value, color }) {
         <span className="text-white/80">{(value * 100).toFixed(0)}%</span>
       </div>
       <div className="h-[2px] w-full bg-white/5 rounded-full overflow-hidden">
-        <div 
-          className={`h-full ${color} transition-all duration-150 ease-out`}
-          style={{ width: `${value * 100}%` }}
-        />
+        <div className={`h-full ${color} transition-all duration-150 ease-out`} style={{ width: `${value * 100}%` }} />
       </div>
     </div>
   );

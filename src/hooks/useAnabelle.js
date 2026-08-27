@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useRef, useCallback } from 'react';
 
 export const useAnabelle = () => {
   const [analysis, setAnalysis] = useState({
@@ -7,7 +7,8 @@ export const useAnabelle = () => {
     rawText: '',
     source: 'STANDBY',
     isSpeaking: false,
-    status: 'idle'
+    status: 'idle',
+    errorMessage: ''
   });
 
   const socketRef = useRef(null);
@@ -15,93 +16,86 @@ export const useAnabelle = () => {
   const processorRef = useRef(null);
   const streamRef = useRef(null);
 
-  // Constants for AI compatibility
+  // --- REAL-TIME TUNING ---
   const SAMPLE_RATE = 16000;
-  const BUFFER_SIZE = 4096; // ~250ms of audio per packet
+  // 16384 samples = ~1.024 seconds of audio. 
+  // This matches our backend's 0.5s rate limit and provides stable AI context.
+  const BUFFER_SIZE = 16384; 
 
   const startEngine = useCallback(async () => {
-    // 1. Establish WebSocket Connection
-    socketRef.current = new WebSocket("ws://localhost:8000/ws/anabelle");
+    setAnalysis(prev => ({ ...prev, status: 'connecting', errorMessage: '' }));
 
-    socketRef.current.onopen = () => {
-      console.log("ANABELLE: Connected to Python AI Backend");
-      setAnalysis(prev => ({ ...prev, status: 'connected', source: 'INITIALIZING' }));
-    };
-
-    socketRef.current.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.status !== "error") {
-          setAnalysis(prev => ({
-            ...prev,
-            emotion: data.emotion,
-            rawText: data.raw_text || prev.rawText,
-            source: data.source || 'AI_MODEL'
-          }));
-        }
-      } catch (err) {
-        console.error("Payload Error:", err);
-      }
-    };
-
-    socketRef.current.onclose = () => {
-      setAnalysis(prev => ({ ...prev, status: 'disconnected', source: 'OFFLINE' }));
-    };
-
-    // 2. Initialize Audio Pipeline
     try {
+      socketRef.current = new WebSocket("ws://localhost:8000/ws/anabelle");
+
+      socketRef.current.onopen = () => {
+        setAnalysis(prev => ({ ...prev, status: 'active', source: 'AI_CONNECTED' }));
+      };
+
+      socketRef.current.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        
+        // When AI sends a result, update the emotion and text
+        setAnalysis(prev => ({
+          ...prev,
+          emotion: data.emotion,
+          rawText: data.raw_text || prev.rawText,
+          source: data.source || 'AI_MODEL'
+        }));
+      };
+
+      socketRef.current.onerror = () => {
+        setAnalysis(prev => ({ 
+          ...prev, 
+          status: 'error', 
+          errorMessage: 'Backend unreachable. Start Python main.py first.' 
+        }));
+      };
+
+      // 2. Audio Pipeline
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
-
-      // Create AudioContext at 16kHz for SenseVoice
-      audioCtxRef.current = new (window.AudioContext || window.webkitAudioContext)({
-        sampleRate: SAMPLE_RATE,
-      });
-
+      audioCtxRef.current = new AudioContext({ sampleRate: SAMPLE_RATE });
       const source = audioCtxRef.current.createMediaStreamSource(stream);
+      
       processorRef.current = audioCtxRef.current.createScriptProcessor(BUFFER_SIZE, 1, 1);
 
       processorRef.current.onaudioprocess = (e) => {
         const inputData = e.inputBuffer.getChannelData(0);
         
-        // --- LOCAL REFLEX: Instant Volume Calculation ---
+        // --- INSTANT REFLEX (Local) ---
         let sum = 0;
-        for (let i = 0; i < inputData.length; i++) {
-          sum += inputData[i] * inputData[i];
-        }
+        for (let i = 0; i < inputData.length; i++) sum += inputData[i] * inputData[i];
         const rms = Math.sqrt(sum / inputData.length);
-        const currentEnergy = Math.max(0, Math.min(1, rms * 10)); // Normalize 0-1
+        const currentEnergy = Math.max(0, Math.min(1, rms * 10));
 
-        // Update local reflexes every frame
+        // Update local bars 60 times a second
         setAnalysis(prev => ({
           ...prev,
           energy: currentEnergy,
           isSpeaking: currentEnergy > 0.02
         }));
 
-        // --- REMOTE COGNITION: Stream to Python AI ---
+        // --- DEFERRED COGNITION (Remote) ---
         if (socketRef.current?.readyState === WebSocket.OPEN) {
-          // Send raw float32 buffer directly
           socketRef.current.send(inputData.buffer);
         }
       };
 
-      // Connect nodes
       source.connect(processorRef.current);
       processorRef.current.connect(audioCtxRef.current.destination);
 
     } catch (err) {
-      console.error("Microphone Access Denied:", err);
-      setAnalysis(prev => ({ ...prev, status: 'error', source: 'MIC_DENIED' }));
+      setAnalysis(prev => ({ ...prev, status: 'error', errorMessage: 'Mic initialization failed.' }));
     }
   }, []);
 
   const stopEngine = useCallback(() => {
+    socketRef.current?.close();
     processorRef.current?.disconnect();
     audioCtxRef.current?.close();
-    streamRef.current?.getTracks().forEach(track => track.stop());
-    socketRef.current?.close();
-    setAnalysis({ energy: 0, emotion: 'NEUTRAL', rawText: '', source: 'STANDBY', isSpeaking: false, status: 'idle' });
+    streamRef.current?.getTracks().forEach(t => t.stop());
+    setAnalysis(prev => ({ ...prev, status: 'idle' }));
   }, []);
 
   return { analysis, startEngine, stopEngine };
